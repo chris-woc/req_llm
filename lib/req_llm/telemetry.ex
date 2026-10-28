@@ -969,25 +969,41 @@ defmodule ReqLLM.Telemetry do
 
   defp sanitize_tool(tool), do: tool
 
-  defp sanitize_tool_schema(schema) when is_struct(schema) do
-    schema
-    |> Map.from_struct()
-    |> sanitize_tool_schema()
+  # A tool's parameters as the JSON Schema the provider is sent, not the
+  # NimbleOptions keyword list (or Zoi schema) it was declared with. A keyword
+  # schema carries type tuples — `{:in, _}`, `{:list, _}`, `{:or, _}` — that are
+  # not JSON-encodable, so the OpenTelemetry bridge had to drop the parameters
+  # of every tool declared with one from `gen_ai.tool.definitions`. A map is
+  # already JSON Schema and passes through unchanged.
+  defp sanitize_tool_schema(nil), do: nil
+
+  defp sanitize_tool_schema(schema) when is_list(schema) or is_struct(schema) do
+    ReqLLM.Schema.to_json(schema)
+  rescue
+    _ -> sanitize_generic_schema(schema)
   end
 
-  defp sanitize_tool_schema(schema) when is_list(schema) do
+  defp sanitize_tool_schema(schema), do: sanitize_generic_schema(schema)
+
+  defp sanitize_generic_schema(schema) when is_struct(schema) do
+    schema
+    |> Map.from_struct()
+    |> sanitize_generic_schema()
+  end
+
+  defp sanitize_generic_schema(schema) when is_list(schema) do
     if Keyword.keyword?(schema) do
-      Map.new(schema, fn {key, value} -> {key, sanitize_tool_schema(value)} end)
+      Map.new(schema, fn {key, value} -> {key, sanitize_generic_schema(value)} end)
     else
-      Enum.map(schema, &sanitize_tool_schema/1)
+      Enum.map(schema, &sanitize_generic_schema/1)
     end
   end
 
-  defp sanitize_tool_schema(schema) when is_map(schema) do
-    Map.new(schema, fn {key, value} -> {key, sanitize_tool_schema(value)} end)
+  defp sanitize_generic_schema(schema) when is_map(schema) do
+    Map.new(schema, fn {key, value} -> {key, sanitize_generic_schema(value)} end)
   end
 
-  defp sanitize_tool_schema(schema), do: schema
+  defp sanitize_generic_schema(schema), do: schema
 
   defp sanitize_generic_payload(%Response{} = response), do: sanitize_response(response)
   defp sanitize_generic_payload(%Context{} = context), do: sanitize_context(context)

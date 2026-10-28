@@ -373,8 +373,8 @@ defmodule ReqLLM.TelemetryTest do
     assert sanitized_tool.name == "lookup_weather"
     assert sanitized_tool.description == "Fetches weather data"
     assert sanitized_tool.strict == false
-    assert sanitized_tool.parameter_schema[:location][:type] == :string
-    assert sanitized_tool.parameter_schema[:location][:required] == true
+    assert sanitized_tool.parameter_schema["properties"]["location"]["type"] == "string"
+    assert sanitized_tool.parameter_schema["required"] == ["location"]
     refute Map.has_key?(sanitized_tool, :callback)
     refute Map.has_key?(sanitized_tool, :compiled)
 
@@ -440,6 +440,58 @@ defmodule ReqLLM.TelemetryTest do
     assert speech_stop.response_payload.media_type == "audio/mpeg"
     assert speech_stop.response_payload.format == "mp3"
     refute Map.has_key?(speech_stop.response_payload, :audio)
+  end
+
+  test "raw payload mode renders a keyword tool schema as the JSON Schema the provider is sent" do
+    model = reasoning_model(:openai, "gpt-5")
+
+    # NimbleOptions type tuples are not JSON-encodable. Sanitized as a map of
+    # the keyword list, they made the OpenTelemetry bridge drop the parameters.
+    tool =
+      ReqLLM.Tool.new!(
+        name: "ask_question",
+        description: "Ask one question",
+        parameter_schema: [
+          field_key: [type: {:in, ["budget", "other"]}, required: true, doc: "Which field"],
+          options: [type: {:list, :string}, required: true],
+          intro: [type: :string]
+        ],
+        callback: fn _args -> {:ok, "asked"} end
+      )
+
+    context = %ReqLLM.Context{
+      messages: [%Message{role: :user, content: [ContentPart.text("hello")]}],
+      tools: [tool]
+    }
+
+    telemetry_context =
+      model
+      |> ReqLLM.Telemetry.new_context([context: context, telemetry: [payloads: :raw]],
+        operation: :chat
+      )
+      |> ReqLLM.Telemetry.start_request(%{})
+
+    ReqLLM.Telemetry.stop_request(telemetry_context, response_with_reasoning(model.id))
+
+    start_meta = single_event_metadata(collect_events(), [:req_llm, :request, :start])
+    [sanitized_tool] = start_meta.request_payload.tools
+
+    assert sanitized_tool.parameter_schema == ReqLLM.Schema.to_json(tool.parameter_schema)
+
+    assert sanitized_tool.parameter_schema["properties"]["field_key"]["enum"] == [
+             "budget",
+             "other"
+           ]
+
+    assert sanitized_tool.parameter_schema["properties"]["options"]["type"] == "array"
+
+    assert [definition] =
+             %{request_payload: start_meta.request_payload}
+             |> ReqLLM.OpenTelemetry.Content.tool_definitions()
+             |> Enum.map(&Jason.decode!/1)
+
+    assert definition["name"] == "ask_question"
+    assert definition["parameters"]["required"] == ["field_key", "options"]
   end
 
   test "raw payload mode sanitizes opaque fallback payloads" do
