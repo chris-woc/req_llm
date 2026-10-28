@@ -313,7 +313,8 @@ defmodule ReqLLM.Test.Billing.Live do
     usage = body["usage"]
 
     if phase == "warm" do
-      assert is_integer(usage["cache_read_input_tokens"]) and usage["cache_read_input_tokens"] > 0,
+      assert is_integer(usage["cache_read_input_tokens"]) and
+               usage["cache_read_input_tokens"] > 0,
              "warm request did not establish a cache hit"
     else
       assert is_integer(usage["cache_creation_input_tokens"]) and

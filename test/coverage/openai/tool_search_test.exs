@@ -75,7 +75,8 @@ defmodule ReqLLM.Coverage.OpenAI.ToolSearchTest do
 
   defp assert_search_turn(%Response{} = response) do
     item_types =
-      for %ContentPart{type: :provider_block, data: %{"type" => type}} <- response.message.content,
+      for %ContentPart{type: :provider_block, data: %{"type" => type}} <-
+            response.message.content,
           do: type
 
     assert "tool_search_call" in item_types

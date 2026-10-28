@@ -2182,7 +2182,8 @@ defmodule ReqLLM.Providers.Google do
   end
 
   defp first_candidate_parts(%{"candidates" => [%{"content" => %{"parts" => parts}} | _]})
-       when is_list(parts), do: parts
+       when is_list(parts),
+       do: parts
 
   defp first_candidate_parts(_body), do: []
 
