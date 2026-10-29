@@ -953,21 +953,38 @@ defmodule ReqLLM.Telemetry do
       name: tool.name,
       description: tool.description,
       strict: tool.strict,
-      parameter_schema: sanitize_tool_schema(tool.parameter_schema)
+      parameter_schema: sanitize_tool_schema(tool.parameter_schema),
+      parameters: tool_parameters_json(tool.parameter_schema)
     }
   end
 
   defp sanitize_tool(%{name: name, description: description} = tool) do
+    schema = Map.get(tool, :parameter_schema) || Map.get(tool, :input_schema)
+
     %{
       name: name,
       description: description,
       strict: Map.get(tool, :strict, false),
-      parameter_schema:
-        sanitize_tool_schema(Map.get(tool, :parameter_schema) || Map.get(tool, :input_schema))
+      parameter_schema: sanitize_tool_schema(schema),
+      parameters: tool_parameters_json(schema)
     }
   end
 
   defp sanitize_tool(tool), do: tool
+
+  # The JSON Schema the provider is sent for the tool's parameters, beside the
+  # schema as declared (`parameter_schema`). A keyword schema carries
+  # NimbleOptions type tuples — `{:in, _}`, `{:list, _}`, `{:or, _}` — that no
+  # JSON encoder accepts, so a consumer that has to encode the schema (the
+  # OpenTelemetry bridge's `gen_ai.tool.definitions`) reads this key. `nil` for
+  # a schema `ReqLLM.Schema.to_json/1` cannot render.
+  defp tool_parameters_json(schema) when is_list(schema) or is_map(schema) do
+    ReqLLM.Schema.to_json(schema)
+  rescue
+    _ -> nil
+  end
+
+  defp tool_parameters_json(_schema), do: nil
 
   defp sanitize_tool_schema(schema) when is_struct(schema) do
     schema
