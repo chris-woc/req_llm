@@ -203,7 +203,7 @@ defmodule ReqLLM.OpenTelemetry.Content do
         %{"type" => "function", "name" => name}
         |> maybe_put("description", fetch_field(tool, :description))
         |> maybe_put("strict", fetch_field(tool, :strict))
-        |> maybe_put_parameters(name, fetch_field(tool, :parameter_schema))
+        |> maybe_put_parameters(name, tool_parameters(tool))
 
       is_binary(type) and type != "" ->
         %{"type" => type}
@@ -217,6 +217,18 @@ defmodule ReqLLM.OpenTelemetry.Content do
   end
 
   defp tool_to_otel(_), do: nil
+
+  # A raw telemetry payload carries the tool's schema twice: as declared
+  # (`parameter_schema`, which for a keyword schema holds NimbleOptions type
+  # tuples no JSON encoder accepts) and as the JSON Schema the provider was
+  # sent (`parameters`). The attribute wants the latter; the former is the
+  # fallback for tools that arrive without it.
+  defp tool_parameters(tool) do
+    case fetch_field(tool, :parameters) do
+      nil -> fetch_field(tool, :parameter_schema)
+      parameters -> parameters
+    end
+  end
 
   defp maybe_put_parameters(map, _name, nil), do: map
   defp maybe_put_parameters(map, _name, []), do: map

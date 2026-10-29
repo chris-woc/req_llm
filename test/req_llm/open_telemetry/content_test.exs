@@ -343,6 +343,29 @@ defmodule ReqLLM.OpenTelemetry.ContentTest do
       assert log =~ "dropping tool \"structured_output\" parameters"
     end
 
+    test "prefers the JSON Schema a raw payload carries in `parameters` over the declared schema" do
+      tools = [
+        %{
+          name: "ask_question",
+          description: "Ask one question",
+          parameter_schema: %{field_key: %{type: {:in, ["budget", "other"]}, required: true}},
+          parameters: %{
+            "type" => "object",
+            "properties" => %{"field_key" => %{"type" => "string", "enum" => ["budget", "other"]}},
+            "required" => ["field_key"]
+          }
+        }
+      ]
+
+      assert [tool] =
+               %{request_payload: %{tools: tools}}
+               |> Content.tool_definitions()
+               |> decode_all()
+
+      assert tool["parameters"]["properties"]["field_key"]["enum"] == ["budget", "other"]
+      assert tool["parameters"]["required"] == ["field_key"]
+    end
+
     test "keeps parameters that are valid JSON Schema" do
       tools = [
         %{

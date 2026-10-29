@@ -442,6 +442,58 @@ defmodule ReqLLM.TelemetryTest do
     refute Map.has_key?(speech_stop.response_payload, :audio)
   end
 
+  test "raw payload mode carries the JSON Schema for a keyword tool schema beside it" do
+    model = reasoning_model(:openai, "gpt-5")
+
+    # NimbleOptions type tuples are not JSON-encodable. Sanitized as a map of
+    # the keyword list, they made the OpenTelemetry bridge drop the parameters.
+    tool =
+      ReqLLM.Tool.new!(
+        name: "ask_question",
+        description: "Ask one question",
+        parameter_schema: [
+          field_key: [type: {:in, ["budget", "other"]}, required: true, doc: "Which field"],
+          options: [type: {:list, :string}, required: true],
+          intro: [type: :string]
+        ],
+        callback: fn _args -> {:ok, "asked"} end
+      )
+
+    context = %ReqLLM.Context{
+      messages: [%Message{role: :user, content: [ContentPart.text("hello")]}],
+      tools: [tool]
+    }
+
+    telemetry_context =
+      model
+      |> ReqLLM.Telemetry.new_context([context: context, telemetry: [payloads: :raw]],
+        operation: :chat
+      )
+      |> ReqLLM.Telemetry.start_request(%{})
+
+    ReqLLM.Telemetry.stop_request(telemetry_context, response_with_reasoning(model.id))
+
+    start_meta = single_event_metadata(collect_events(), [:req_llm, :request, :start])
+    [sanitized_tool] = start_meta.request_payload.tools
+
+    # The declared schema is still there, as it was.
+    assert sanitized_tool.parameter_schema[:field_key][:type] == {:in, ["budget", "other"]}
+    assert sanitized_tool.parameter_schema[:options][:type] == {:list, :string}
+
+    # And the JSON Schema the provider is sent, which does encode.
+    assert sanitized_tool.parameters == ReqLLM.Schema.to_json(tool.parameter_schema)
+    assert sanitized_tool.parameters["properties"]["field_key"]["enum"] == ["budget", "other"]
+    assert sanitized_tool.parameters["properties"]["options"]["type"] == "array"
+
+    assert [definition] =
+             %{request_payload: start_meta.request_payload}
+             |> ReqLLM.OpenTelemetry.Content.tool_definitions()
+             |> Enum.map(&Jason.decode!/1)
+
+    assert definition["name"] == "ask_question"
+    assert definition["parameters"]["required"] == ["field_key", "options"]
+  end
+
   test "raw payload mode sanitizes opaque fallback payloads" do
     model = reasoning_model(:openai, "gpt-5")
 
